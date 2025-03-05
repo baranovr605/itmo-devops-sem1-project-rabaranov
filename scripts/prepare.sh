@@ -16,7 +16,7 @@ PSQL_PORT="5432"
 PSQL_USER="validator"
 PSQL_PASSWORD="val1dat0r"
 PSQL_DB_NAME="project-sem-1"
-PSQL_DEFAULT_DB_NAME="posgres"
+PSQL_DEFAULT_DB_NAME="postgres"
 export PGPASSWORD="$PSQL_PASSWORD"
 
 # Drop database (for clean all data)

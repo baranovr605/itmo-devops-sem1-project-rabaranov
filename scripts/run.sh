@@ -13,9 +13,3 @@ export PSQL_DB_NAME="project-sem-1"
 
 # Start app
 ./app &
-app_pid=$!
-
-# Wait untill start app
-until curl -s http://localhost:8080; do
-    sleep 5
-done

@@ -31,7 +31,7 @@ var (
 
 var postgresDb *sql.DB
 
-func setupPostgres() {
+func setupPostgres() (*sql.DB, error) {
 	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s "+
 		"password=%s dbname=%s sslmode=disable",
 		hostPsql, portPsql, userPsql, passwordPsql, dbnameDbPsql)
@@ -39,16 +39,16 @@ func setupPostgres() {
 	postgresDb, err := sql.Open("postgres", psqlInfo)
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	defer postgresDb.Close()
 
 	err = postgresDb.Ping()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	fmt.Println("Successfully connected!")
+	fmt.Println("Successfully connected to database!")
+	return postgresDb, nil
 }
 
 // POST for add data in database
@@ -270,7 +270,11 @@ func handlerRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	setupPostgres()
+	var err error
+	postgresDb, err = setupPostgres()
+	if err != nil {
+		panic(err)
+	}
 	defer postgresDb.Close()
 
 	http.HandleFunc("/api/v0/prices", handlerRequests)

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -278,4 +279,5 @@ func main() {
 	defer postgresDb.Close()
 
 	http.HandleFunc("/api/v0/prices", handlerRequests)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

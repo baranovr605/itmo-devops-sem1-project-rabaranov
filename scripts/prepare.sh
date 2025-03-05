@@ -11,7 +11,7 @@ if [[ "$1" == "not_create_database" ]];
     fi
 
 # Vars for connect to database
-PSQL_HOST="project-sem-1"
+PSQL_HOST="localhost"
 PSQL_PORT="5432"
 PSQL_USER="validator"
 PSQL_PASSWORD="val1dat0r"

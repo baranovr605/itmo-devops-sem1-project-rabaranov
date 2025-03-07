@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	_ "github.com/lib/pq"
 )
@@ -55,7 +56,7 @@ func setupPostgres() (*sql.DB, error) {
 // POST for add data in database
 func postZipRequest(w http.ResponseWriter, r *http.Request) {
 	// Apply zip file
-	zipFile, _, err := r.FormFile("file")
+	zipFile, fileHeader, err := r.FormFile("file")
 
 	if err != nil {
 		http.Error(w, "Cant read file", http.StatusBadRequest)
@@ -64,7 +65,7 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zipFile.Close()
 
-	archive, err := zip.OpenReader("archive.zip")
+	archive, err := zip.OpenReader(fileHeader.Filename)
 	if err != nil {
 		panic(err)
 	}
@@ -85,7 +86,7 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Read all the files from zip archive
 	for _, zipFile := range zipReader.File {
-		if zipFile.Name == "data.csv" {
+		if strings.HasSuffix(zipFile.Name, ".csv") {
 			zipFileOpened, err := zipFile.Open()
 			if err != nil {
 				http.Error(w, "Cant unzip archive", http.StatusInternalServerError)
@@ -114,7 +115,7 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 
-				_, err = postgresDb.Exec(`INSERT INTO prices (id, name, category, price, create_date) VALUES ($1, $2, $3, $4, $5)`,
+				_, err = postgresDb.Exec(`INSERT INTO prices (id, name, category, price, create_date) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
 					record[0], record[1], record[2], record[3], record[4])
 				if err != nil {
 					http.Error(w, "Error when write data to database", http.StatusInternalServerError)
@@ -145,7 +146,7 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Query for total price sum
-	totalPriceRow := postgresDb.QueryRow("SELECT COALESCE(SUM(price), 0) FROM prices;")
+	totalPriceRow := postgresDb.QueryRow("SELECT COALESCE(SUM(CAST(price AS numeric)), 0) FROM prices;")
 	var totalPrice float64
 	if err := totalPriceRow.Scan(&totalPrice); err != nil {
 		http.Error(w, "Cant get total price", http.StatusInternalServerError)
@@ -185,7 +186,6 @@ func getZipRequest(w http.ResponseWriter, r *http.Request) {
 	defer csvFile.Close()
 
 	writer := csv.NewWriter(csvFile)
-	defer writer.Flush()
 
 	// Add header
 	headers := []string{"id", "name", "category", "price", "create_date"}
@@ -212,7 +212,14 @@ func getZipRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check eerrors after write
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		http.Error(w, "Error flushing data to data.csv", http.StatusInternalServerError)
+		fmt.Println("Error flushing data!")
+		return
+	}
+
+	// Check errors after write
 	if err := allRows.Err(); err != nil {
 		http.Error(w, "Error after write data", http.StatusInternalServerError)
 		return
@@ -227,7 +234,6 @@ func getZipRequest(w http.ResponseWriter, r *http.Request) {
 	defer zipFile.Close()
 
 	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
 
 	// Add data.csv to zip archive
 	zipFileWriter, err := zipWriter.Create("data.csv")
@@ -237,7 +243,7 @@ func getZipRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open data.csv for reading (with data)
-	csvFile, err = os.Open("data.csv")
+	csvFileRead, err := os.Open("data.csv")
 	if err != nil {
 		http.Error(w, "Cant open data.csv with data to read", http.StatusInternalServerError)
 		return
@@ -245,11 +251,12 @@ func getZipRequest(w http.ResponseWriter, r *http.Request) {
 	defer csvFile.Close()
 
 	// Copy data.csv (with data) to data.csv inside data.zip
-	if _, err := io.Copy(zipFileWriter, csvFile); err != nil {
+	if _, err := io.Copy(zipFileWriter, csvFileRead); err != nil {
 		http.Error(w, "Cant copy data.csv (with data) to data.csv inside data.zip", http.StatusInternalServerError)
 		return
 	}
 
+	zipWriter.Close()
 	// Send data.zip to user
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="data.zip"`)
@@ -260,10 +267,10 @@ func handlerRequests(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		// Handle POST request
-		postZipRequest(w, r)
+		getZipRequest(w, r)
 	case http.MethodPost:
 		// Handle GET request
-		getZipRequest(w, r)
+		postZipRequest(w, r)
 	default:
 		// Method not allowed
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

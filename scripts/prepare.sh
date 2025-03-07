@@ -32,5 +32,5 @@ CREATE TABLE IF NOT EXISTS prices (
     name TEXT,
     category TEXT,
     price TEXT,
-    create_data TEXT
+    create_date TEXT
 );"

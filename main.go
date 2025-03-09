@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -84,6 +85,23 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create transaction
+	postgresTx, err := postgresDb.Begin()
+	if err != nil {
+		http.Error(w, "Cant create transaction", http.StatusInternalServerError)
+		return
+	}
+	// Defer a rollback in case anything fails.
+	defer func() {
+		if err != nil {
+			postgresTx.Rollback()
+			return
+		}
+		err = postgresTx.Commit()
+	}()
+
+	var itemCount = 0
+
 	// Read all the files from zip archive
 	for _, zipFile := range zipReader.File {
 		if strings.HasSuffix(zipFile.Name, ".csv") {
@@ -115,8 +133,16 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 
-				_, err = postgresDb.Exec(`INSERT INTO prices (id, name, category, price, create_date) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-					record[0], record[1], record[2], record[3], record[4])
+				// createDate to DATE
+				formatedDate, err := time.Parse("2006-01-02", record[4])
+				if err != nil {
+					http.Error(w, "Cant format date", http.StatusBadRequest)
+					return
+				}
+
+				_, err = postgresTx.Exec(`INSERT INTO prices (name, category, price, create_date) VALUES ($1, $2, $3, $4)`,
+					record[1], record[2], record[3], formatedDate)
+				itemCount++
 				if err != nil {
 					http.Error(w, "Error when write data to database", http.StatusInternalServerError)
 					return
@@ -129,32 +155,24 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Query for total item count
-	totalItemsRow := postgresDb.QueryRow("SELECT COUNT(*) FROM prices;")
-	var totalItems int
-	if err := totalItemsRow.Scan(&totalItems); err != nil {
-		http.Error(w, "Cant get total items", http.StatusInternalServerError)
-		return
-	}
-
-	// Query for total distinct categories
-	totalCategoriesRow := postgresDb.QueryRow("SELECT COUNT(DISTINCT category) FROM prices;")
 	var totalCategories int
-	if err := totalCategoriesRow.Scan(&totalCategories); err != nil {
-		http.Error(w, "Cant get total categories", http.StatusInternalServerError)
-		return
-	}
-
-	// Query for total price sum
-	totalPriceRow := postgresDb.QueryRow("SELECT COALESCE(SUM(CAST(price AS numeric)), 0) FROM prices;")
 	var totalPrice float64
-	if err := totalPriceRow.Scan(&totalPrice); err != nil {
-		http.Error(w, "Cant get total price", http.StatusInternalServerError)
+
+	// Select categories and price
+	rowSelect := postgresTx.QueryRow(`
+    SELECT 
+        COUNT(DISTINCT category) AS total_categories,
+        COALESCE(SUM(CAST(price AS numeric)), 0) AS total_price
+    FROM prices;
+	`)
+
+	if err := rowSelect.Scan(&totalCategories, &totalPrice); err != nil {
+		http.Error(w, "Cant get total categories and price", http.StatusInternalServerError)
 		return
 	}
 
 	userResponseDb := userResponse{
-		TotalItems:      totalItems,
+		TotalItems:      itemCount,
 		TotalCategories: totalCategories,
 		TotalPrice:      totalPrice,
 	}
@@ -170,7 +188,7 @@ func postZipRequest(w http.ResponseWriter, r *http.Request) {
 
 func getZipRequest(w http.ResponseWriter, r *http.Request) {
 	// Query for get all data from database
-	allRows, err := postgresDb.Query("SELECT id, name, category, price, create_date FROM prices")
+	allRows, err := postgresDb.Query("SELECT id, name, category, price, TO_CHAR(create_date, 'YYYY-MM-DD') FROM prices")
 	if err != nil {
 		http.Error(w, "Cant read data from database", http.StatusInternalServerError)
 		return
